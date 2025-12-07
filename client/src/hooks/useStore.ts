@@ -57,7 +57,7 @@ interface AppState {
   closeLogin: () => void;
   completeLogin: (data: { name: string; phone: string }) => void;
   toggleRole: () => Promise<void>;
-  updateProfile: (data: { name: string; phone: string }) => Promise<void>;
+  updateProfile: (data: { name: string; phone?: string }) => Promise<void>;
   setShowAddPostModal: (show: boolean) => void;
   addPost: (post: Omit<FeedPost, 'id' | 'language'>) => Promise<void>; // Changed to async
   submitOrder: (order: any) => Promise<void>; // Added submitOrder
@@ -327,13 +327,13 @@ export const useStore = create<AppState>()(
         }
       },
 
-      updateProfile: async (data: { name: string; phone: string }) => {
+      updateProfile: async (data: { name: string; phone?: string }) => {
         const state = get();
         try {
           await updateUser({
             user_id: state.userId,
             name: data.name,
-            phone: data.phone,
+            phone: data.phone || state.registration.phone || '',
             username: state.registration.username
           });
           set((state) => ({

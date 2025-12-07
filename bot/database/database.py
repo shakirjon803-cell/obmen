@@ -245,6 +245,41 @@ async def create_tables():
             )
         """)
 
+        # Reviews table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_user_id INTEGER NOT NULL,
+                to_user_id INTEGER NOT NULL,
+                post_id INTEGER,
+                deal_id INTEGER,
+                rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+                comment TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(from_user_id) REFERENCES web_accounts(id),
+                FOREIGN KEY(to_user_id) REFERENCES web_accounts(id)
+            )
+        """)
+
+        # Deals table (completed exchanges)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS deals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER,
+                offer_id INTEGER,
+                client_id INTEGER NOT NULL,
+                exchanger_id INTEGER NOT NULL,
+                rate TEXT,
+                location TEXT,
+                status TEXT DEFAULT 'pending',
+                ticket_sent INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Avatar column for web_accounts
+        await _ensure_column(db, "web_accounts", "avatar_url", "TEXT")
+
         await db.commit()
         logging.info("Tables created successfully")
 
@@ -961,3 +996,117 @@ async def delete_all_posts():
         cursor = await db.execute("SELECT changes()")
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+# ============= REVIEWS =============
+
+async def add_review(from_user_id: int, to_user_id: int, rating: int, comment: str = None, post_id: int = None, deal_id: int = None):
+    """Add a review for a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT INTO reviews (from_user_id, to_user_id, rating, comment, post_id, deal_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (from_user_id, to_user_id, rating, comment, post_id, deal_id)
+        )
+        await db.commit()
+
+async def get_user_reviews(user_id: int):
+    """Get all reviews for a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT r.*, wa.nickname as from_nickname, wa.name as from_name 
+               FROM reviews r 
+               LEFT JOIN web_accounts wa ON r.from_user_id = wa.id 
+               WHERE r.to_user_id = ? 
+               ORDER BY r.created_at DESC""",
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+async def get_user_rating(user_id: int) -> dict:
+    """Get average rating and count for user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "SELECT AVG(rating) as avg_rating, COUNT(*) as count FROM reviews WHERE to_user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return {"rating": row[0] or 5.0, "count": row[1] or 0}
+
+# ============= PROFILES =============
+
+async def get_public_profile(user_id: int) -> dict:
+    """Get public profile data for a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT id, nickname, name, role, avatar_url, created_at FROM web_accounts WHERE id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        
+        profile = dict(row)
+        
+        # Get rating
+        rating_data = await get_user_rating(user_id)
+        profile['rating'] = rating_data['rating']
+        profile['review_count'] = rating_data['count']
+        
+        return profile
+
+async def get_user_posts(user_id: int):
+    """Get all posts by a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        # Try to get by web account id first
+        cursor = await db.execute(
+            "SELECT telegram_id FROM web_accounts WHERE id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        telegram_id = row[0] if row else user_id
+        
+        cursor = await db.execute(
+            "SELECT * FROM market_posts WHERE user_id = ? ORDER BY created_at DESC",
+            (telegram_id,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+async def update_avatar(user_id: int, avatar_url: str):
+    """Update user avatar"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE web_accounts SET avatar_url = ? WHERE id = ?",
+            (avatar_url, user_id)
+        )
+        await db.commit()
+
+# ============= DEALS =============
+
+async def create_deal(client_id: int, exchanger_id: int, rate: str, location: str, request_id: int = None, offer_id: int = None):
+    """Create a new deal"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "INSERT INTO deals (client_id, exchanger_id, rate, location, request_id, offer_id, status) VALUES (?, ?, ?, ?, ?, ?, 'confirmed')",
+            (client_id, exchanger_id, rate, location, request_id, offer_id)
+        )
+        deal_id = cursor.lastrowid
+        await db.commit()
+        return deal_id
+
+async def get_deal(deal_id: int):
+    """Get deal by ID"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM deals WHERE id = ?", (deal_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+async def mark_ticket_sent(deal_id: int):
+    """Mark that ticket was sent for deal"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE deals SET ticket_sent = 1 WHERE id = ?", (deal_id,))
+        await db.commit()

@@ -480,6 +480,100 @@ async def catch_all(request):
     path = os.path.join(CLIENT_DIST_DIR, 'index.html')
     return web.FileResponse(path)
 
+# ============= PROFILE ENDPOINTS =============
+
+@routes.get('/api/users/{user_id}')
+async def get_user_profile(request):
+    """Get public profile"""
+    user_id = int(request.match_info['user_id'])
+    from bot.database.database import get_public_profile
+    profile = await get_public_profile(user_id)
+    if not profile:
+        return web.json_response({'error': 'not_found'}, status=404)
+    return web.json_response(profile)
+
+@routes.get('/api/users/{user_id}/posts')
+async def get_user_posts_endpoint(request):
+    """Get all posts by user"""
+    user_id = int(request.match_info['user_id'])
+    from bot.database.database import get_user_posts
+    posts = await get_user_posts(user_id)
+    return web.json_response(posts)
+
+@routes.get('/api/users/{user_id}/reviews')
+async def get_user_reviews_endpoint(request):
+    """Get all reviews for user"""
+    user_id = int(request.match_info['user_id'])
+    from bot.database.database import get_user_reviews
+    reviews = await get_user_reviews(user_id)
+    return web.json_response(reviews)
+
+@routes.post('/api/reviews')
+async def add_review_endpoint(request):
+    """Add a review"""
+    data = await request.json()
+    from_user = data.get('from_user_id')
+    to_user = data.get('to_user_id')
+    rating = data.get('rating')
+    comment = data.get('comment', '')
+    post_id = data.get('post_id')
+    
+    if not all([from_user, to_user, rating]):
+        return web.json_response({'error': 'missing_data'}, status=400)
+    
+    from bot.database.database import add_review
+    await add_review(from_user, to_user, rating, comment, post_id)
+    return web.json_response({'success': True})
+
+# ============= DEAL ENDPOINTS =============
+
+@routes.post('/api/deals/accept')
+async def accept_deal(request):
+    """Accept an offer and create a deal"""
+    data = await request.json()
+    client_id = data.get('client_id')
+    exchanger_id = data.get('exchanger_id')
+    rate = data.get('rate', '')
+    location = data.get('location', '')
+    
+    from bot.database.database import create_deal, get_public_profile
+    deal_id = await create_deal(client_id, exchanger_id, rate, location)
+    
+    # Get both users info for ticket
+    client = await get_public_profile(client_id)
+    exchanger = await get_public_profile(exchanger_id)
+    
+    # Send ticket via bot (if available)
+    bot = request.app.get('bot')
+    if bot and client and exchanger:
+        from datetime import datetime
+        ticket_text = f"""
+💱 <b>NellX - СДЕЛКА ПОДТВЕРЖДЕНА</b>
+━━━━━━━━━━━━━━━━━
+🕐 Время: {datetime.now().strftime('%H:%M %d.%m.%Y')}
+👤 Клиент: {client.get('name', 'Клиент')}
+🏪 Обменник: {exchanger.get('name', 'Обменник')}
+📍 Район: {location}
+💰 Курс: {rate}
+━━━━━━━━━━━━━━━━━
+<i>NellX • Безопасный обмен</i>
+"""
+        # Try to send to both users
+        try:
+            from bot.database.database import get_account_by_id
+            client_acc = await get_account_by_id(client_id)
+            exchanger_acc = await get_account_by_id(exchanger_id)
+            
+            if client_acc and client_acc.get('telegram_id'):
+                await bot.send_message(client_acc['telegram_id'], ticket_text, parse_mode="HTML")
+            if exchanger_acc and exchanger_acc.get('telegram_id'):
+                await bot.send_message(exchanger_acc['telegram_id'], ticket_text, parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"Failed to send ticket: {e}")
+    
+    return web.json_response({'success': True, 'deal_id': deal_id})
+
+
 async def init_web_app(bot):
     app = web.Application(middlewares=[log_requests])
     app['bot'] = bot
