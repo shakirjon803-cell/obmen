@@ -408,6 +408,16 @@ async def handle_get_my_posts(request):
     posts = await get_user_market_posts(int(user_id))
     return web.json_response(posts)
 
+@routes.get('/api/posts/{id}')
+async def handle_get_post(request):
+    """Get single post by ID"""
+    post_id = int(request.match_info['id'])
+    from bot.database.database import get_market_post
+    post = await get_market_post(post_id)
+    if not post:
+        return web.json_response({'error': 'not_found'}, status=404)
+    return web.json_response(post)
+
 @routes.put('/api/market/{id}')
 async def handle_update_post(request):
     post_id = int(request.match_info['id'])

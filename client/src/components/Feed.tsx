@@ -3,7 +3,7 @@ import { useStore } from '@/hooks/useStore';
 import { MapPin, Search, X, Plus, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { PostDetailModal } from './PostDetailModal';
+import { useNavigate } from 'react-router-dom';
 
 export function Feed() {
   const {
@@ -18,15 +18,14 @@ export function Feed() {
     myPosts,
     fetchMyPosts,
     fetchMarketPosts,
-    userId,
-    botUsername
+    userId
   } = useStore();
 
+  const navigate = useNavigate();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [isMyPostsMode, setIsMyPostsMode] = useState(false);
-  const [selectedPost, setSelectedPost] = useState<any>(null);
 
   React.useEffect(() => {
     fetchCategories();
@@ -70,18 +69,9 @@ export function Feed() {
     return post.ownerId === userId || post.user_id === userId;
   };
 
-  // Open Telegram chat with post author
-  const handleOpenChat = (post: any) => {
-    // Get username from post or registration
-    const username = post.username || post.owner_username;
-    if (username) {
-      const cleanUsername = username.replace('@', '');
-      window.location.href = `https://t.me/${cleanUsername}`;
-    } else if (post.ownerId || post.user_id) {
-      // Fallback: open bot with chat command
-      const targetId = post.ownerId || post.user_id;
-      window.location.href = `https://t.me/${botUsername || 'malxam_proverkBot'}?start=chat_${targetId}`;
-    }
+  // Navigate to post page instead of modal
+  const handlePostClick = (post: any) => {
+    navigate(`/post/${post.id}`);
   };
 
   return (
@@ -177,7 +167,7 @@ export function Feed() {
         {filteredPosts.map((post) => (
           <div
             key={post.id}
-            onClick={() => setSelectedPost(post)}
+            onClick={() => handlePostClick(post)}
             className="aspect-square bg-white rounded-xl border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition-all relative"
           >
             {/* Background Image or Gradient */}
@@ -229,14 +219,6 @@ export function Feed() {
           <p className="text-gray-500 text-sm">Нет постов</p>
         </div>
       )}
-
-      {/* Post Detail Modal */}
-      <PostDetailModal
-        post={selectedPost}
-        isOwn={selectedPost ? isOwnPost(selectedPost) : false}
-        onClose={() => setSelectedPost(null)}
-        onChat={() => selectedPost && handleOpenChat(selectedPost)}
-      />
     </motion.div>
   );
 }

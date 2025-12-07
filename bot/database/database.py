@@ -719,6 +719,19 @@ async def get_user_market_posts(user_id: int):
         async with db.execute("SELECT * FROM market_posts WHERE user_id = ? ORDER BY created_at DESC", (user_id,)) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
+async def get_market_post(post_id: int):
+    """Get single market post by ID with author info"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT mp.*, u.username as author_username, u.display_name as author_name
+            FROM market_posts mp
+            LEFT JOIN users u ON mp.user_id = u.telegram_id
+            WHERE mp.id = ?
+        """, (post_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
 async def update_market_post(post_id: int, user_id: int, amount: float, rate: float, description: str, p_type: str = None, currency: str = None, location: str = None, category: str = None, image_data: str = None):
     async with aiosqlite.connect(DB_NAME) as db:
         # Construct query dynamically based on provided fields

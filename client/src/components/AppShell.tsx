@@ -8,25 +8,24 @@ import { CreateRequest } from './CreateRequest';
 import { Offers } from './Offers';
 import { Profile } from './Profile';
 import { ExchangerInbox } from './ExchangerInbox';
-import { TelegramHandoff } from './TelegramHandoff';
-import { PostDetails } from './PostDetails';
 import { Onboarding } from './Onboarding';
 import { AddPostSheet } from './AddPostSheet';
-import { EditPostSheet } from './EditPostSheet';
+import { PostPage } from './PostPage';
+import { UserPage } from './UserPage';
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 
 import { Loading } from './Loading';
 
 export function AppShell() {
   const { activeTab, registration, role, onboardingSeen, loginMode, setTelegramUser, fetchMarketPosts } = useStore();
   const [isLoading, setIsLoading] = React.useState(true);
+  const location = useLocation();
 
   React.useEffect(() => {
-    // Simulate initial load
-    const timer = setTimeout(() => setIsLoading(false), 1000);
+    const timer = setTimeout(() => setIsLoading(false), 800);
     useStore.getState().fetchConfig();
-    // Telegram init
     try {
       const tgUser = (window as any)?.Telegram?.WebApp?.initDataUnsafe?.user;
       if (tgUser) {
@@ -47,7 +46,6 @@ export function AppShell() {
     return <Loading />;
   }
 
-  // Check if user fully completed registration (clicked "Continue" button)
   const isRegistered = registration.completed === true;
 
   // Show onboarding first
@@ -55,65 +53,55 @@ export function AppShell() {
     return <Onboarding />;
   }
 
-  // Show login if user clicked "already have account"
+  // Show login
   if (loginMode) {
     return (
-      <AnimatePresence mode="wait">
-        <motion.div
-          key="login"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          className="min-h-screen bg-white"
-        >
-          <Header />
-          <div className="max-w-md mx-auto pt-20 pb-20 px-4 sm:px-6">
-            <Login />
-          </div>
-        </motion.div>
-      </AnimatePresence>
+      <div className="min-h-screen bg-white">
+        <Header />
+        <div className="max-w-md mx-auto pt-14 pb-20 px-4">
+          <Login />
+        </div>
+      </div>
     );
   }
 
-  // Then show registration
+  // Show registration
   if (!isRegistered) {
     return (
-      <AnimatePresence mode="wait">
-        <motion.div
-          key="registration"
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 20 }}
-          className="min-h-screen bg-white"
-        >
-          <Header />
-          <div className="max-w-md mx-auto pt-20 pb-20 px-4 sm:px-6">
-            <Registration />
-          </div>
-        </motion.div>
-      </AnimatePresence>
+      <div className="min-h-screen bg-white">
+        <Header />
+        <div className="max-w-md mx-auto pt-14 pb-20 px-4">
+          <Registration />
+        </div>
+      </div>
     );
   }
 
-  // Finally show main app
+  // Check if we're on a sub-page (post or user)
+  const isSubPage = location.pathname.startsWith('/post/') || location.pathname.startsWith('/user/');
+
+  // Main app with routing
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-50">
       <Header />
-      <div className="max-w-md mx-auto pt-20 pb-24 px-4 sm:px-6">
-        <AnimatePresence mode="wait">
-          {activeTab === 'feed' && <Feed key="feed" />}
-          {activeTab === 'create' && <CreateRequest key="create" />}
-          {activeTab === 'offers' && (
-            role === 'exchanger' ? <ExchangerInbox key="exchanger" /> : <Offers key="offers" />
-          )}
-          {activeTab === 'profile' && <Profile key="profile" />}
-        </AnimatePresence>
+      <div className="max-w-md mx-auto pt-14 pb-24 px-4">
+        <Routes>
+          <Route path="/post/:id" element={<PostPage />} />
+          <Route path="/user/:id" element={<UserPage />} />
+          <Route path="*" element={
+            <AnimatePresence mode="wait">
+              {activeTab === 'feed' && <Feed key="feed" />}
+              {activeTab === 'create' && <CreateRequest key="create" />}
+              {activeTab === 'offers' && (
+                role === 'exchanger' ? <ExchangerInbox key="exchanger" /> : <Offers key="offers" />
+              )}
+              {activeTab === 'profile' && <Profile key="profile" />}
+            </AnimatePresence>
+          } />
+        </Routes>
       </div>
-      <TabBar />
-      <TelegramHandoff />
-      <PostDetails />
+      {!isSubPage && <TabBar />}
       <AddPostSheet />
-      <EditPostSheet />
     </div>
   );
 }
