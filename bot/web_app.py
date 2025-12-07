@@ -135,6 +135,23 @@ async def handle_verify_seller(request):
         return web.json_response({'success': True})
     return web.json_response({'error': 'invalid_code'}, status=400)
 
+@routes.post('/api/auth/verify-code')
+async def handle_verify_code_from_site(request):
+    """User enters code from bot to verify account"""
+    data = await request.json()
+    code = data.get('code', '').strip()
+    account_id = data.get('account_id')
+    
+    if not code:
+        return web.json_response({'error': 'missing_code'}, status=400)
+    
+    from bot.database.database import verify_bot_code
+    result = await verify_bot_code(code, account_id)
+    
+    if result.get('success'):
+        return web.json_response({'success': True})
+    return web.json_response({'error': 'invalid_code'}, status=400)
+
 # ============= LEGACY ENDPOINTS (keep for compatibility) =============
 
 @routes.post('/api/auth/generate-code')

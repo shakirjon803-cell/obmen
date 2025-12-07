@@ -1,32 +1,62 @@
 import { useState } from 'react';
 import { useStore } from '@/hooks/useStore';
-import { t } from '@/lib/i18n';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { motion } from 'framer-motion';
+import { User, Lock, Eye, EyeOff, ArrowLeft, RefreshCw } from 'lucide-react';
+
+const API_BASE = '';
 
 export function Login() {
-  const { language, completeLogin, closeLogin } = useStore();
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const { closeLogin, setRegistration, completeRegistration } = useStore();
+  const [nickname, setNickname] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = () => {
-    const newErrors: Record<string, string> = {};
+  const handleLogin = async () => {
+    setError('');
 
-    if (!phone.trim()) {
-      newErrors.phone = t('phoneRequired', language);
+    if (!nickname.trim()) {
+      setError('Введите ник');
+      return;
     }
-    if (!name.trim()) {
-      newErrors.name = t('nameRequired', language);
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (!password) {
+      setError('Введите пароль');
       return;
     }
 
-    completeLogin({ name, phone });
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: nickname.trim(), password })
+      });
+      const data = await res.json();
+
+      if (data.error === 'invalid_credentials') {
+        setError('Неверный ник или пароль');
+        return;
+      }
+      if (data.error) {
+        setError('Ошибка входа');
+        return;
+      }
+
+      // Success
+      setRegistration({
+        name: data.name,
+        verified: data.telegram_linked,
+        completed: true
+      });
+      completeRegistration();
+    } catch (e) {
+      setError('Ошибка сети');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -34,54 +64,80 @@ export function Login() {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      transition={{ duration: 0.12, ease: 'easeOut' }}
+      transition={{ duration: 0.15 }}
       className="space-y-6"
     >
+      {/* Back button */}
+      <button
+        onClick={closeLogin}
+        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm"
+      >
+        <ArrowLeft size={16} />
+        Назад
+      </button>
+
       <div>
-        <h2 className="text-title mb-8">{t('login', language)}</h2>
-        <div className="space-y-5">
-          <div>
-            <label htmlFor="login-phone" className="block text-caption text-gray-500 mb-2 font-medium">
-              {t('phone', language)}
-            </label>
+        <h2 className="text-2xl font-bold mb-2">Вход</h2>
+        <p className="text-sm text-gray-500">Введите данные аккаунта</p>
+      </div>
+
+      <div className="space-y-4">
+        {/* Nickname */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">Ник (логин)</label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <Input
-              id="login-phone"
-              type="tel"
-              inputMode="tel"
-              pattern="[0-9\s\+\-]+"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-200 rounded-md text-body bg-white"
+              type="text"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value.toLowerCase().replace(/\s/g, ''))}
+              placeholder="nickname"
+              className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl"
             />
-            {errors.phone && <p className="text-caption text-red-500 mt-2">{errors.phone}</p>}
-          </div>
-          <div>
-            <label htmlFor="login-name" className="block text-caption text-gray-500 mb-2 font-medium">
-              {t('name', language)}
-            </label>
-            <Input
-              id="login-name"
-              placeholder={t('yourName', language)}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-200 rounded-md text-body bg-white"
-            />
-            {errors.name && <p className="text-caption text-red-500 mt-2">{errors.name}</p>}
           </div>
         </div>
+
+        {/* Password */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">Пароль</label>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <Input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••"
+              className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <p className="text-red-500 text-sm text-center">{error}</p>
+        )}
+
         <Button
-          onClick={handleSubmit}
-          className="w-full mt-8 btn-primary py-3 rounded-md text-body font-medium"
+          onClick={handleLogin}
+          disabled={isLoading}
+          className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium"
         >
-          {t('loginButton', language)}
+          {isLoading ? <RefreshCw className="animate-spin" size={18} /> : 'Войти'}
         </Button>
-        <button
-          onClick={closeLogin}
-          className="w-full mt-4 text-body text-gray-600 hover:text-gray-900 transition-colors"
-        >
-          {t('createAccount', language)}
-        </button>
       </div>
+
+      <p className="text-center text-sm text-gray-500">
+        Нет аккаунта?{' '}
+        <button onClick={closeLogin} className="text-gray-900 font-medium">
+          Создать
+        </button>
+      </p>
     </motion.div>
   );
 }

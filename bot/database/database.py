@@ -234,6 +234,17 @@ async def create_tables():
             )
         """)
 
+        # Bot verification codes (bot sends to user, user enters on site)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_verification_codes (
+                telegram_id INTEGER PRIMARY KEY,
+                phone TEXT NOT NULL,
+                code TEXT NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         await db.commit()
         logging.info("Tables created successfully")
 
@@ -886,6 +897,59 @@ async def verify_seller_code(code: str, account_id: int) -> bool:
         )
         await db.commit()
         return True
+
+# ============= BOT VERIFICATION (Bot sends code, user enters on site) =============
+
+async def generate_bot_verification_code(telegram_id: int, phone: str) -> str:
+    """Bot generates code and sends to user. User will enter this on website."""
+    code = generate_numeric_code(6)
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Store the code
+        await db.execute(
+            "INSERT OR REPLACE INTO bot_verification_codes (telegram_id, phone, code, created_at) VALUES (?, ?, ?, datetime('now'))",
+            (telegram_id, phone, code)
+        )
+        await db.commit()
+    return code
+
+async def verify_bot_code(code: str, account_id: int = None) -> dict:
+    """User enters code on website. Link phone to account."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "SELECT telegram_id, phone FROM bot_verification_codes WHERE code = ? AND used = 0",
+            (code,)
+        )
+        row = await cursor.fetchone()
+        
+        if not row:
+            return {"error": "invalid_code"}
+        
+        telegram_id, phone = row
+        
+        # Mark as used
+        await db.execute("UPDATE bot_verification_codes SET used = 1 WHERE code = ?", (code,))
+        
+        # Link to account if provided
+        if account_id:
+            await db.execute(
+                "UPDATE web_accounts SET telegram_id = ?, phone = ? WHERE id = ?",
+                (telegram_id, phone, account_id)
+            )
+        
+        await db.commit()
+        return {"success": True, "telegram_id": telegram_id, "phone": phone}
+
+async def is_phone_registered(phone: str) -> bool:
+    """Check if phone number is already registered"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Clean phone number
+        clean_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
+        cursor = await db.execute(
+            "SELECT id FROM web_accounts WHERE REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '-', '') = ?",
+            (clean_phone,)
+        )
+        row = await cursor.fetchone()
+        return row is not None
 
 # ============= ADMIN FUNCTIONS =============
 
