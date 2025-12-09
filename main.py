@@ -45,12 +45,14 @@ async def main():
 
     # Start Web App Server
     try:
+        import os
+        port = int(os.getenv('PORT', 8080))
         app = await init_web_app(bot)
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
-        logging.info("🚀 Web App started on http://localhost:8080")
+        logging.info(f"🚀 Web App started on http://0.0.0.0:{port}")
     except Exception as e:
         logging.error(f"Failed to start Web App: {e}")
 

@@ -72,14 +72,17 @@ export function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nickname: nickname.trim(), password })
       });
+
       const data = await res.json();
 
-      if (data.error === 'invalid_credentials') {
-        setError('Неверный ник или пароль');
-        return;
-      }
-      if (data.error) {
-        setError('Ошибка входа');
+      // Handle error responses (401, etc.)
+      if (!res.ok || data.error) {
+        if (data.error === 'invalid_credentials' || res.status === 401) {
+          setError('Неверный ник или пароль');
+        } else {
+          setError('Ошибка входа');
+        }
+        setIsLoading(false);
         return;
       }
 
@@ -90,42 +93,42 @@ export function Login() {
       setIsFirstLogin(!hasLoggedInBefore);
       localStorage.setItem(`logged_in_${nickname.toLowerCase()}`, 'true');
 
-      // Show success screen
-      setShowSuccess(true);
-
       // Determine role from server response
       const userRole = data.is_seller ? 'exchanger' : (data.role || 'client');
 
-      // Set user data
-      if (data.telegram_id) {
-        setTelegramUser({ id: data.telegram_id, name: data.name || nickname });
-      }
+      // CRITICAL: Save to localStorage FIRST before any state updates
+      // NOTE: Don't save avatarUrl - it's base64 and can overflow localStorage!
+      try {
+        const currentStorage = localStorage.getItem('obmen-storage');
+        const parsed = currentStorage ? JSON.parse(currentStorage) : { state: {}, version: 0 };
 
-      // Save directly to localStorage first
-      const currentStorage = localStorage.getItem('obmen-storage');
-      if (currentStorage) {
-        try {
-          const parsed = JSON.parse(currentStorage);
-          parsed.state.registration = {
-            ...parsed.state.registration,
+        parsed.state = {
+          ...parsed.state,
+          registration: {
+            ...(parsed.state?.registration || {}),
             name: data.name || nickname,
             verified: true,
             completed: true,
             telegramId: data.telegram_id,
             accountId: data.account_id,
-            role: userRole,
-            avatarUrl: data.avatar_url
-          };
-          parsed.state.hasAccount = true;
-          parsed.state.role = userRole;
-          parsed.state.loginMode = false;
-          if (data.telegram_id) {
-            parsed.state.userId = data.telegram_id;
-          }
-          localStorage.setItem('obmen-storage', JSON.stringify(parsed));
-        } catch (e) {
-          console.error('Failed to save to localStorage', e);
-        }
+            role: userRole
+            // avatarUrl NOT saved - too big for localStorage
+          },
+          hasAccount: true,
+          role: userRole,
+          loginMode: false,
+          onboardingSeen: true,
+          userId: data.telegram_id || parsed.state?.userId
+        };
+
+        localStorage.setItem('obmen-storage', JSON.stringify(parsed));
+      } catch (e) {
+        console.error('Failed to save to localStorage', e);
+      }
+
+      // Set user data in zustand
+      if (data.telegram_id) {
+        setTelegramUser({ id: data.telegram_id, name: data.name || nickname });
       }
 
       setRegistration({
@@ -139,15 +142,23 @@ export function Login() {
       });
       setRole(userRole);
       completeRegistration();
-      
-      // Reload page after short delay to show success animation
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 1500);
 
-    } catch (e) {
-      setError('Ошибка сети');
-    } finally {
+      // Show success briefly then redirect
+      setShowSuccess(true);
+
+      // Immediate redirect - localStorage is already saved
+      setTimeout(() => {
+        window.location.replace('/');
+      }, 800);
+
+    } catch (e: any) {
+      console.error('Login error:', e);
+      // Show more specific error if available
+      if (e.message?.includes('Failed to fetch')) {
+        setError('Сервер недоступен');
+      } else {
+        setError('Ошибка: ' + (e.message || 'неизвестная'));
+      }
       setIsLoading(false);
     }
   };

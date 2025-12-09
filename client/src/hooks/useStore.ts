@@ -481,16 +481,23 @@ export const useStore = create<AppState>()(
         }
       },
 
-      logout: () => set({
-        registration: { name: '', phone: '', username: '', role: null, agreed: false, verified: false },
-        role: null,
-        hasAccount: false,
-        loginMode: false,
-        activeTab: 'feed',
-        feedPosts: [],
-        selectedPost: null,
-        onboardingSeen: true // Keep onboarding seen
-      }),
+      logout: () => {
+        // Clear localStorage first
+        localStorage.removeItem('obmen-storage');
+        // Reset state
+        set({
+          registration: { name: '', phone: '', username: '', role: null, agreed: false, verified: false },
+          role: null,
+          hasAccount: false,
+          loginMode: false,
+          activeTab: 'feed',
+          feedPosts: [],
+          selectedPost: null,
+          onboardingSeen: true // Keep onboarding seen
+        });
+        // Force reload to clean state
+        window.location.reload();
+      },
 
       setTelegramUser: (data: { id?: number; username?: string; name?: string }) => {
         set((state) => ({
@@ -507,13 +514,16 @@ export const useStore = create<AppState>()(
     {
       name: 'obmen-storage',
       storage: createJSONStorage(() => localStorage),
+      // DON'T persist feedPosts - they contain base64 images and overflow localStorage!
       partialize: (state) => ({
         language: state.language,
         role: state.role,
-        registration: state.registration,
+        registration: {
+          ...state.registration,
+          avatarUrl: undefined // Don't persist avatar base64 either
+        },
         hasAccount: state.hasAccount,
         onboardingSeen: state.onboardingSeen,
-        feedPosts: state.feedPosts,
         userId: state.userId
       }),
     }

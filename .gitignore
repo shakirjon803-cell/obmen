@@ -1,7 +1,8 @@
 # Logs
 *.log
-*.txt
+ssh_tunnel*.txt
 !README.md
+!requirements.txt
 
 # Python
 __pycache__/
@@ -11,7 +12,8 @@ __pycache__/
 
 # Node
 node_modules/
-dist/
+# Keep client/dist for deployment
+!client/dist/
 .DS_Store
 
 # IDE

@@ -3,27 +3,17 @@ import { Button } from './ui/button';
 import { motion } from 'framer-motion';
 import { MessageCircle, ArrowRight, Shield, Sparkles } from 'lucide-react';
 
-// NellX Logo as SVG
-function NellXLogo({ className = "h-12" }: { className?: string }) {
+// NellX Logo - simple and clean
+function NellXLogo({ className = "text-3xl" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 200 50" className={className} fill="currentColor">
-      {/* N */}
-      <path d="M0 10 L0 40 L8 40 L8 22 L22 40 L30 40 L30 10 L22 10 L22 28 L8 10 Z" />
-      {/* e */}
-      <path d="M38 22 C38 16 43 12 50 12 C57 12 62 16 62 22 L62 26 L46 26 C47 30 50 32 54 32 C57 32 59 31 61 29 L61 36 C58 38 55 40 50 40 C43 40 38 34 38 28 L38 22 Z M46 22 L54 22 C54 19 52 17 50 17 C48 17 46 19 46 22 Z" />
-      {/* l */}
-      <path d="M68 5 L76 5 L76 40 L68 40 Z" />
-      {/* l */}
-      <path d="M82 5 L90 5 L90 40 L82 40 Z" />
-      {/* X with arrows */}
-      <g transform="translate(100, 0)">
-        <path d="M0 10 L15 25 L0 40 L10 40 L20 30 L30 40 L40 40 L25 25 L40 10 L30 10 L20 20 L10 10 Z" />
-        <path d="M35 5 L50 5 L50 8 L42 8 L42 20 L38 20 L38 8 L35 8 Z" />
-        <path d="M45 2 L53 10 L45 10 Z" fill="currentColor" />
-        <path d="M42 30 L42 42 L50 42 L50 45 L35 45 L35 42 L38 42 L38 30 Z" />
-        <path d="M45 48 L53 40 L45 40 Z" fill="currentColor" />
-      </g>
-    </svg>
+    <div className={`font-black tracking-tight ${className}`}>
+      <span>Nell</span>
+      <span className="relative">
+        X
+        <span className="absolute -top-1 -right-2 text-xs">↗</span>
+        <span className="absolute -bottom-1 -right-2 text-xs">↙</span>
+      </span>
+    </div>
   );
 }
 
@@ -49,7 +39,7 @@ export function Registration() {
         transition={{ delay: 0.1, duration: 0.3 }}
         className="relative mb-6 text-gray-900"
       >
-        <NellXLogo className="h-10" />
+        <NellXLogo className="text-3xl" />
 
         {/* Telegram badge */}
         <motion.div
