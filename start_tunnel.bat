@@ -7,7 +7,8 @@ echo =============================================
 echo    NellX SSH Tunnel - localhost.run
 echo =============================================
 echo.
-echo Starting... Copy the URL when it appears!
+echo IMPORTANT: Copy the URL that appears!
+echo Update .env file with new WEBAPP_URL
 echo.
 
 :start

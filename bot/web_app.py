@@ -763,6 +763,46 @@ async def handle_send_chat(request):
         logging.error(f"Failed to send chat handoff: {e}")
         return web.json_response({'error': 'Failed to send message'}, status=500)
 
+# ============= ALIASES FOR BOLT.AI COMPATIBILITY =============
+
+@routes.get('/api/posts')
+async def handle_get_posts_alias(request):
+    """Alias for /api/market"""
+    posts = await get_market_posts()
+    return web.json_response(posts)
+
+@routes.post('/api/posts')
+async def handle_create_post_alias(request):
+    """Alias for /api/market POST"""
+    data = await request.json()
+    await create_market_post(
+        int(data['user_id']),
+        data['type'],
+        float(data['amount']),
+        data['currency'],
+        float(data['rate']),
+        data['location'],
+        data['description'],
+        data.get('category'),
+        data.get('image_data')
+    )
+    return web.json_response({'status': 'ok'})
+
+@routes.get('/api/users/{user_id}/orders')
+async def handle_get_user_orders_by_id(request):
+    """Get orders for a specific user"""
+    user_id = int(request.match_info['user_id'])
+    orders = await get_user_orders(user_id)
+    return web.json_response(orders)
+
+@routes.get('/api/users/{user_id}/bids')
+async def handle_get_user_bids_by_id(request):
+    """Get bids for a specific user"""
+    user_id = int(request.match_info['user_id'])
+    from bot.database.database import get_user_bids
+    bids = await get_user_bids(user_id)
+    return web.json_response(bids)
+
 # Catch-all for React Router (SPA)
 @routes.get('/{tail:.*}')
 async def catch_all(request):
