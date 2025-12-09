@@ -2,33 +2,13 @@ import { Plus, ArrowLeft } from 'lucide-react';
 import { useStore } from '@/hooks/useStore';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-// NellX Logo SVG Component
 function NellXLogo() {
   return (
-    <div className="flex items-center gap-0.5">
-      <span className="text-xl font-black tracking-tight text-gray-900">Nell</span>
-      <div className="relative">
-        <span className="text-xl font-black text-gray-900">X</span>
-        <svg
-          className="absolute -top-0.5 -right-1.5 w-2 h-2 text-gray-900"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="4"
-        >
-          <path d="M7 17L17 7M17 7H7M17 7V17" />
-        </svg>
-        <svg
-          className="absolute -bottom-0.5 -right-1.5 w-2 h-2 text-gray-900 rotate-180"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="4"
-        >
-          <path d="M7 17L17 7M17 7H7M17 7V17" />
-        </svg>
-      </div>
-    </div>
+    <img
+      src="/gemini_generated_image_4g9jw74g9jw74g9j.png"
+      alt="NellX"
+      className="h-9 w-auto"
+    />
   );
 }
 

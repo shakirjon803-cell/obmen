@@ -3,17 +3,13 @@ import { Button } from './ui/button';
 import { motion } from 'framer-motion';
 import { MessageCircle, ArrowRight, Shield, Sparkles } from 'lucide-react';
 
-// NellX Logo - simple and clean
-function NellXLogo({ className = "text-3xl" }: { className?: string }) {
+function NellXLogo() {
   return (
-    <div className={`font-black tracking-tight ${className}`}>
-      <span>Nell</span>
-      <span className="relative">
-        X
-        <span className="absolute -top-1 -right-2 text-xs">↗</span>
-        <span className="absolute -bottom-1 -right-2 text-xs">↙</span>
-      </span>
-    </div>
+    <img
+      src="/gemini_generated_image_4g9jw74g9jw74g9j.png"
+      alt="NellX"
+      className="h-14 w-auto"
+    />
   );
 }
 
@@ -39,7 +35,7 @@ export function Registration() {
         transition={{ delay: 0.1, duration: 0.3 }}
         className="relative mb-6 text-gray-900"
       >
-        <NellXLogo className="text-3xl" />
+        <NellXLogo />
 
         {/* Telegram badge */}
         <motion.div

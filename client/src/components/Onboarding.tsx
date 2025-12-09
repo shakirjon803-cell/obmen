@@ -4,34 +4,13 @@ import { t } from '@/lib/i18n';
 import { Button } from './ui/button';
 import { motion } from 'framer-motion';
 
-// Beautiful NellX Logo
 function NellXLogo() {
   return (
-    <div className="flex items-center justify-center gap-1">
-      <span className="text-5xl font-black tracking-tight text-gray-900">Nell</span>
-      <div className="relative">
-        <span className="text-5xl font-black text-gray-900">X</span>
-        {/* Arrow decorations */}
-        <svg
-          className="absolute -top-1 -right-3 w-4 h-4 text-gray-900"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-        >
-          <path d="M7 17L17 7M17 7H7M17 7V17" />
-        </svg>
-        <svg
-          className="absolute -bottom-1 -right-3 w-4 h-4 text-gray-900 rotate-180"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-        >
-          <path d="M7 17L17 7M17 7H7M17 7V17" />
-        </svg>
-      </div>
-    </div>
+    <img
+      src="/gemini_generated_image_4g9jw74g9jw74g9j.png"
+      alt="NellX"
+      className="h-20 w-auto"
+    />
   );
 }
 
