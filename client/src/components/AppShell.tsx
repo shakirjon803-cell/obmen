@@ -9,6 +9,7 @@ import { Offers } from './Offers';
 import { Profile } from './Profile';
 import { Onboarding } from './Onboarding';
 import { AddPostSheet } from './AddPostSheet';
+import { EditPostSheet } from './EditPostSheet';
 import { PostPage } from './PostPage';
 import { UserPage } from './UserPage';
 import React from 'react';
@@ -46,6 +47,9 @@ export function AppShell() {
     // Non-blocking - all async
     useStore.getState().fetchConfig();
     fetchMarketPosts();
+
+    // Load avatar from server if user has accountId
+    useStore.getState().loadAccountAvatar();
 
     // Get Telegram user data
     try {
@@ -114,6 +118,7 @@ export function AppShell() {
       </div>
       {!isSubPage && <TabBar />}
       <AddPostSheet />
+      <EditPostSheet />
     </div>
   );
 }

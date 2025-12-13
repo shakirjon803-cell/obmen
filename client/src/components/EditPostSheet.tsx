@@ -1,37 +1,50 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ImagePlus, Trash2, Loader2 } from 'lucide-react';
+import { X, ImagePlus, Trash2, Loader2, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
 import { useStore } from '@/hooks/useStore';
 import { t } from '@/lib/i18n';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const CURRENCIES = ['USD', 'EUR', 'EGP', 'RUB', 'AED', 'USDT'];
 const LOCATIONS = ['Район 4.5', 'Район 6-10', 'Ваха', 'Хургада', 'Шарм-эль-Шейх', 'Каир'];
 
+const MAX_TITLE_LENGTH = 60;
+const MAX_DESCRIPTION_LENGTH = 500;
+
 export function EditPostSheet() {
     const { language, editingPost, setEditingPost, editPost, fetchMarketPosts } = useStore();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Primary fields
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [imageData, setImageData] = useState<string | null>(null);
+
+    // Optional fields (collapsible)
+    const [showOptionalFields, setShowOptionalFields] = useState(false);
     const [amount, setAmount] = useState('');
     const [rate, setRate] = useState('');
     const [location, setLocation] = useState('');
-    const [description, setDescription] = useState('');
-    const [currency, setCurrency] = useState('USD');
+    const [currency, setCurrency] = useState('');
     const [type, setType] = useState<'buy' | 'sell'>('sell');
-    const [imageData, setImageData] = useState<string | null>(null);
+
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         if (editingPost) {
+            setTitle(editingPost.title || editingPost.description?.slice(0, MAX_TITLE_LENGTH) || '');
+            setDescription(editingPost.description || '');
             setAmount(editingPost.amount?.toString() || '');
             setRate(editingPost.rate?.toString() || '');
             setLocation(editingPost.location || '');
-            setDescription(editingPost.description || '');
-            setCurrency(editingPost.currency || 'USD');
+            setCurrency(editingPost.currency || '');
             setType(editingPost.type || 'sell');
             setImageData(editingPost.image_data || editingPost.thumbnailUrl || null);
+            // Auto-expand optional fields if any have values
+            if (editingPost.location || editingPost.currency || editingPost.rate) {
+                setShowOptionalFields(true);
+            }
         }
     }, [editingPost]);
 
@@ -53,17 +66,32 @@ export function EditPostSheet() {
         }
     };
 
+    const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        if (value.length <= MAX_TITLE_LENGTH) {
+            setTitle(value);
+        }
+    };
+
+    const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        if (value.length <= MAX_DESCRIPTION_LENGTH) {
+            setDescription(value);
+        }
+    };
+
     const handleSubmit = async () => {
-        if (!editingPost || !description.trim()) {
+        if (!editingPost || !title.trim()) {
             return;
         }
 
         setIsSubmitting(true);
         try {
             await editPost(editingPost.id, {
+                title: title.trim(),
+                description: description.trim(),
                 amount: parseFloat(amount) || 0,
                 rate: parseFloat(rate) || 0,
-                description,
                 type,
                 currency,
                 location,
@@ -116,6 +144,26 @@ export function EditPostSheet() {
 
                         {/* Scrollable Content */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            {/* Title (Mandatory) */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-2">
+                                    Заголовок <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={title}
+                                    onChange={handleTitleChange}
+                                    placeholder="Введите заголовок объявления..."
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                />
+                                <p className={cn(
+                                    "text-xs mt-1",
+                                    title.length >= MAX_TITLE_LENGTH ? "text-red-500" : "text-gray-400"
+                                )}>
+                                    {title.length}/{MAX_TITLE_LENGTH}
+                                </p>
+                            </div>
+
                             {/* Image Upload */}
                             <div>
                                 <label className="block text-xs font-medium text-gray-500 mb-2">
@@ -150,105 +198,6 @@ export function EditPostSheet() {
                                 )}
                             </div>
 
-                            {/* Type Toggle */}
-                            <div>
-                                <label className="block text-xs font-medium text-gray-500 mb-2">Тип</label>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => setType('buy')}
-                                        className={cn(
-                                            "flex-1 py-3 rounded-xl font-medium transition-all",
-                                            type === 'buy'
-                                                ? "bg-blue-500 text-white"
-                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                        )}
-                                    >
-                                        Покупаю
-                                    </button>
-                                    <button
-                                        onClick={() => setType('sell')}
-                                        className={cn(
-                                            "flex-1 py-3 rounded-xl font-medium transition-all",
-                                            type === 'sell'
-                                                ? "bg-orange-500 text-white"
-                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                        )}
-                                    >
-                                        Продаю
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Currency */}
-                            <div>
-                                <label className="block text-xs font-medium text-gray-500 mb-2">Валюта</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {CURRENCIES.map((c) => (
-                                        <button
-                                            key={c}
-                                            onClick={() => setCurrency(c)}
-                                            className={cn(
-                                                "px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                                                currency === c
-                                                    ? "bg-gray-900 text-white"
-                                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                            )}
-                                        >
-                                            {c}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Amount & Rate */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-500 mb-2">
-                                        {t('amount', language)}
-                                    </label>
-                                    <Input
-                                        type="number"
-                                        placeholder="1000"
-                                        value={amount}
-                                        onChange={(e) => setAmount(e.target.value)}
-                                        className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-500 mb-2">
-                                        Курс
-                                    </label>
-                                    <Input
-                                        type="text"
-                                        placeholder="50.5"
-                                        value={rate}
-                                        onChange={(e) => setRate(e.target.value)}
-                                        className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Location */}
-                            <div>
-                                <label className="block text-xs font-medium text-gray-500 mb-2">Район</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {LOCATIONS.map((loc) => (
-                                        <button
-                                            key={loc}
-                                            onClick={() => setLocation(loc)}
-                                            className={cn(
-                                                "px-3 py-2 rounded-lg text-sm transition-all",
-                                                location === loc
-                                                    ? "bg-gray-900 text-white"
-                                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                            )}
-                                        >
-                                            {loc}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
                             {/* Description */}
                             <div>
                                 <label className="block text-xs font-medium text-gray-500 mb-2">
@@ -257,18 +206,148 @@ export function EditPostSheet() {
                                 <textarea
                                     placeholder="Описание..."
                                     value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
+                                    onChange={handleDescriptionChange}
                                     rows={3}
                                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200"
                                 />
+                                <p className={cn(
+                                    "text-xs mt-1",
+                                    description.length >= MAX_DESCRIPTION_LENGTH ? "text-red-500" : "text-gray-400"
+                                )}>
+                                    {description.length}/{MAX_DESCRIPTION_LENGTH}
+                                </p>
                             </div>
+
+                            {/* Optional Fields Toggle */}
+                            <button
+                                onClick={() => setShowOptionalFields(!showOptionalFields)}
+                                className="w-full flex items-center justify-between py-3 px-4 bg-gray-50 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+                            >
+                                <span>Дополнительные параметры</span>
+                                {showOptionalFields ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                            </button>
+
+                            {/* Optional Fields (Collapsible) */}
+                            <AnimatePresence>
+                                {showOptionalFields && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="space-y-4 overflow-hidden"
+                                    >
+                                        {/* Type Toggle */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-2">Тип</label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setType('buy')}
+                                                    className={cn(
+                                                        "flex-1 py-3 rounded-xl font-medium transition-all",
+                                                        type === 'buy'
+                                                            ? "bg-blue-500 text-white"
+                                                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                                    )}
+                                                >
+                                                    Покупаю
+                                                </button>
+                                                <button
+                                                    onClick={() => setType('sell')}
+                                                    className={cn(
+                                                        "flex-1 py-3 rounded-xl font-medium transition-all",
+                                                        type === 'sell'
+                                                            ? "bg-orange-500 text-white"
+                                                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                                    )}
+                                                >
+                                                    Продаю
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Currency */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-2">Валюта</label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {CURRENCIES.map((c) => (
+                                                    <button
+                                                        key={c}
+                                                        onClick={() => setCurrency(currency === c ? '' : c)}
+                                                        className={cn(
+                                                            "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                                                            currency === c
+                                                                ? "bg-gray-900 text-white"
+                                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                                        )}
+                                                    >
+                                                        {c}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Amount & Rate */}
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-medium text-gray-500 mb-2">
+                                                    {t('amount', language)}
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    placeholder="1000"
+                                                    value={amount}
+                                                    onChange={(e) => setAmount(e.target.value)}
+                                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-gray-500 mb-2">
+                                                    Курс
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="50.5"
+                                                    value={rate}
+                                                    onChange={(e) => setRate(e.target.value)}
+                                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Location */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-2">
+                                                <MapPin size={12} className="inline mr-1" />
+                                                Район
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {LOCATIONS.map((loc) => (
+                                                    <button
+                                                        key={loc}
+                                                        onClick={() => setLocation(location === loc ? '' : loc)}
+                                                        className={cn(
+                                                            "px-3 py-2 rounded-lg text-sm transition-all",
+                                                            location === loc
+                                                                ? "bg-gray-900 text-white"
+                                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                                        )}
+                                                    >
+                                                        {loc}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
 
                         {/* Footer */}
                         <div className="p-4 border-t border-gray-100">
                             <Button
                                 onClick={handleSubmit}
-                                disabled={!description.trim() || isSubmitting}
+                                disabled={!title.trim() || isSubmitting}
                                 className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium disabled:opacity-50"
                             >
                                 {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : t('saveChanges', language)}

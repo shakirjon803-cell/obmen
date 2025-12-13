@@ -81,6 +81,7 @@ interface AppState {
   fetchConfig: () => Promise<void>;
   fetchMarketPosts: () => Promise<void>;
   setTelegramUser: (data: { id?: number; username?: string; name?: string }) => void;
+  loadAccountAvatar: () => Promise<void>;
 }
 
 const sampleFeedPostsRU: FeedPost[] = [];
@@ -140,7 +141,7 @@ export const useStore = create<AppState>()(
             deltaType: 'positive',
             amountStr: `${p.amount} @ ${p.rate}`,
             language: 'ru',
-            title: p.description || p.currency,
+            title: p.title || p.description?.slice(0, 60) || p.currency || '',
             thumbnailUrl: p.image_data,
             description: p.description,
             acceptedCurrencies: [p.currency],
@@ -150,7 +151,9 @@ export const useStore = create<AppState>()(
             type: p.type,
             amount: p.amount,
             rate: p.rate,
-            currency: p.currency
+            currency: p.currency,
+            author_username: p.author_username,
+            author_name: p.author_name
           }));
           set({ feedPosts: mapped });
         } catch (error) {
@@ -295,11 +298,12 @@ export const useStore = create<AppState>()(
             user_id: state.userId,
             type: post.type || 'sell',
             amount: post.amount || 0,
-            currency: post.currency || post.fromCurrency,
+            currency: post.currency || post.fromCurrency || '',
             rate: post.rate || 0,
-            location: post.location,
-            description: post.description,
-            image_data: (post as any).image_data
+            location: post.location || '',
+            description: post.description || '',
+            image_data: (post as any).image_data,
+            title: post.title || ''
           });
         } catch (error) {
           console.error('Failed to sync post to backend', error);
@@ -508,6 +512,30 @@ export const useStore = create<AppState>()(
             name: data.name || state.registration.name
           }
         }));
+      },
+
+      loadAccountAvatar: async () => {
+        const state = get();
+        const accountId = state.registration.accountId;
+        if (!accountId) return;
+
+        try {
+          const res = await fetch(`/api/account?account_id=${accountId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.avatar_url || data.original_avatar_url) {
+              set((s) => ({
+                registration: {
+                  ...s.registration,
+                  avatarUrl: data.avatar_url,
+                  originalAvatarUrl: data.original_avatar_url
+                }
+              }));
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load account avatar', e);
+        }
       }
 
     }),
@@ -520,7 +548,8 @@ export const useStore = create<AppState>()(
         role: state.role,
         registration: {
           ...state.registration,
-          avatarUrl: undefined // Don't persist avatar base64 either
+          avatarUrl: undefined, // Don't persist avatar base64
+          originalAvatarUrl: undefined
         },
         hasAccount: state.hasAccount,
         onboardingSeen: state.onboardingSeen,

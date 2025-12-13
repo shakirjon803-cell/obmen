@@ -75,6 +75,7 @@ export interface RegistrationData {
   verified?: boolean;
   completed?: boolean;
   avatarUrl?: string;
+  originalAvatarUrl?: string; // Full-size original for re-editing
   telegramId?: number;
   accountId?: number;
 }

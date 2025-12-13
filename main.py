@@ -52,7 +52,7 @@ async def main():
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
-        logging.info(f"🚀 Web App started on http://0.0.0.0:{port}")
+        logging.info(f"🚀 Web App started on http://192.168.1.5:{port}")
     except Exception as e:
         logging.error(f"Failed to start Web App: {e}")
 

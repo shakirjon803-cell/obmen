@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Star, MapPin, Loader2 } from 'lucide-react';
+import { Star, MapPin, Loader2, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useStore } from '@/hooks/useStore';
 
 const API_BASE = '';
 
@@ -38,12 +39,15 @@ type Tab = 'posts' | 'reviews';
 export function UserPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { userId } = useStore();
 
     const [profile, setProfile] = useState<any>(null);
     const [posts, setPosts] = useState<any[]>([]);
     const [reviews, setReviews] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<Tab>('posts');
+
+    const isOwnProfile = id === String(userId);
 
     useEffect(() => {
         if (id) {
@@ -82,6 +86,27 @@ export function UserPage() {
             setReviews(data || []);
         } catch (e) {
             console.error('Failed to load reviews');
+        }
+    };
+
+    // Fixed Telegram contact handler
+    const handleContact = () => {
+        // Try multiple ways to get the username
+        let username = profile?.username || profile?.nickname;
+
+        if (username) {
+            // Clean the username - remove @ if present
+            username = username.replace(/^@/, '').trim();
+            // Open Telegram with the username
+            const telegramUrl = `https://t.me/${username}`;
+            window.open(telegramUrl, '_blank');
+        } else if (profile?.telegram_id || id) {
+            // Fallback: use tg://user?id= protocol for users without username
+            const telegramId = profile?.telegram_id || id;
+            const telegramUrl = `tg://user?id=${telegramId}`;
+            window.location.href = telegramUrl;
+        } else {
+            alert('Контактные данные пользователя недоступны');
         }
     };
 
@@ -131,6 +156,17 @@ export function UserPage() {
                 )}>
                     {profile.role === 'exchanger' ? 'Обменник' : 'Клиент'}
                 </div>
+
+                {/* Contact Button - Only show for other users */}
+                {!isOwnProfile && (
+                    <button
+                        onClick={handleContact}
+                        className="mt-4 px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium flex items-center gap-2 active:scale-[0.98] transition-all"
+                    >
+                        <Send size={16} />
+                        Написать в Telegram
+                    </button>
+                )}
             </div>
 
             {/* Tabs */}

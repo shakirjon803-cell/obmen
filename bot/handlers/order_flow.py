@@ -296,18 +296,30 @@ async def finalize_order(event, state: FSMContext, bot: Bot):
 
 
 async def notify_exchangers_new_order(bot: Bot, order_id: int, order_data: dict, client_id: int):
-    """Notify all exchangers about new order"""
+    """Notify all exchangers about new order with Accept/Reject buttons"""
+    from bot.database.database import is_order_dismissed
+    
     exchangers = await get_exchangers_by_location(order_data.get('location'))
     
     for exchanger in exchangers:
         if exchanger['telegram_id'] == client_id:
             continue  # Don't notify the client themselves
         
+        # Check if exchanger dismissed this order before
+        if await is_order_dismissed(exchanger['telegram_id'], order_id):
+            continue
+        
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text="💰 Предложить курс", 
-                callback_data=f"bid_order:{order_id}"
-            )],
+            [
+                InlineKeyboardButton(
+                    text="✅ Взять", 
+                    callback_data=f"bid_order:{order_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Не брать", 
+                    callback_data=f"dismiss_order:{order_id}"
+                )
+            ],
         ])
         
         text = (
@@ -315,7 +327,7 @@ async def notify_exchangers_new_order(bot: Bot, order_id: int, order_data: dict,
             f"💱 <b>Обмен:</b> {order_data['from_currency']} → {order_data['to_currency']}\n"
             f"💰 <b>Сумма:</b> {order_data['amount']} {order_data['from_currency']}\n"
             f"📍 <b>Место:</b> {order_data['location']}\n\n"
-            f"Предложите свой курс!"
+            f"Хотите взять этот заказ?"
         )
         
         try:
@@ -327,6 +339,26 @@ async def notify_exchangers_new_order(bot: Bot, order_id: int, order_data: dict,
             )
         except Exception as e:
             logging.error(f"Failed to notify exchanger {exchanger['telegram_id']}: {e}")
+
+
+# ==================== DISMISS ORDER ====================
+
+@router.callback_query(F.data.startswith("dismiss_order:"))
+async def on_dismiss_order(callback: CallbackQuery):
+    """Exchanger dismisses an order - it disappears for them"""
+    order_id = int(callback.data.split(":")[1])
+    exchanger_id = callback.from_user.id
+    
+    from bot.database.database import dismiss_order
+    await dismiss_order(exchanger_id, order_id)
+    
+    # Delete the notification message
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.warning(f"Failed to delete dismissed order message: {e}")
+    
+    await callback.answer("✅ Заказ убран из списка", show_alert=False)
 
 
 # ==================== EXCHANGER BIDS ====================

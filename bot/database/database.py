@@ -71,6 +71,7 @@ async def create_tables():
         await _ensure_column(db, "templates", "name", "TEXT")
         await _ensure_column(db, "users", "display_name", "TEXT")
         await _ensure_column(db, "users", "username", "TEXT")
+        await _ensure_column(db, "users", "phone", "TEXT")
         
         # Market rates table
         await db.execute("""
@@ -194,6 +195,8 @@ async def create_tables():
 
         # Add category to market_posts
         await _ensure_column(db, "market_posts", "category", "TEXT")
+        # Add title to market_posts for new form structure
+        await _ensure_column(db, "market_posts", "title", "TEXT")
 
         # Web accounts for login/password auth
         await db.execute("""
@@ -282,7 +285,6 @@ async def create_tables():
         # Avatar column for web_accounts
         await _ensure_column(db, "web_accounts", "avatar_url", "TEXT")
 
-        # Seller codes table
         await db.execute("""
             CREATE TABLE IF NOT EXISTS seller_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,10 +295,68 @@ async def create_tables():
             )
         """)
 
+        # Dismissed orders - track which exchangers dismissed which orders
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dismissed_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                exchanger_id INTEGER NOT NULL,
+                order_id INTEGER NOT NULL,
+                dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(exchanger_id, order_id)
+            )
+        """)
+
+        # Exchanger bans - track ban status for becoming exchanger
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS exchanger_bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE NOT NULL,
+                ban_type TEXT NOT NULL,  -- 'temporary' or 'permanent'
+                ban_until DATETIME,  -- NULL for permanent, datetime for temporary
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Favorites - users can like/save posts
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                post_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, post_id)
+            )
+        """)
+
+        # Reports - user reports (spam, scam, etc.)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reporter_id INTEGER NOT NULL,
+                reported_user_id INTEGER,
+                post_id INTEGER,
+                reason TEXT NOT NULL,
+                comment TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Hidden posts - "Not Interested" feature
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS hidden_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                post_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, post_id)
+            )
+        """)
+
         await db.commit()
         logging.info("Tables created successfully")
 
-async def add_user(telegram_id: int, language: str):
+async def add_user(telegram_id: int, language: str, username: str = None):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
             INSERT OR IGNORE INTO users (telegram_id, language)
@@ -305,6 +365,11 @@ async def add_user(telegram_id: int, language: str):
         await db.execute("""
             UPDATE users SET language = ? WHERE telegram_id = ?
         """, (language, telegram_id))
+        # Save username if provided
+        if username:
+            await db.execute("""
+                UPDATE users SET username = ? WHERE telegram_id = ?
+            """, (username, telegram_id))
         await db.commit()
 
 async def update_user_session(telegram_id: int, session_string: str, phone: str):
@@ -315,6 +380,24 @@ async def update_user_session(telegram_id: int, session_string: str, phone: str)
             WHERE telegram_id = ?
         """, (session_string, phone, telegram_id))
         await db.commit()
+
+async def sync_user_from_web_account(telegram_id: int):
+    """Sync user data from web_accounts to users table for contact info"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Get data from web_accounts
+        async with db.execute("""
+            SELECT phone, name FROM web_accounts WHERE telegram_id = ?
+        """, (telegram_id,)) as cursor:
+            row = await cursor.fetchone()
+        
+        if row:
+            phone, name = row
+            # Update users table
+            await db.execute("""
+                UPDATE users SET phone = COALESCE(?, phone), display_name = COALESCE(?, display_name)
+                WHERE telegram_id = ?
+            """, (phone, name, telegram_id))
+            await db.commit()
 
 async def get_user(telegram_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -579,15 +662,45 @@ async def accept_bid(bid_id: int):
         await db.commit()
         return bid
 
+async def complete_bid(bid_id: int):
+    """Mark a bid as completed - deal finished"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        # Get bid first
+        async with db.execute("SELECT * FROM bids WHERE id = ?", (bid_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            bid = dict(row)
+        
+        # Update bid status to completed
+        await db.execute("UPDATE bids SET status = 'completed' WHERE id = ?", (bid_id,))
+        
+        # Close the order
+        await db.execute("UPDATE orders SET status = 'completed' WHERE id = ?", (bid['order_id'],))
+        
+        # Increment deals count for exchanger
+        await db.execute("""
+            UPDATE users SET deals_count = COALESCE(deals_count, 0) + 1 WHERE telegram_id = ?
+        """, (bid['exchanger_id'],))
+        
+        await db.commit()
+        return bid
+
+
 async def get_order_bids(order_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        # Join with users to get exchanger info (rating, name/id)
-        # Note: users table doesn't have name, we rely on telegram_id or fetch from bot
+        # Join with users and web_accounts to get exchanger info
         async with db.execute("""
-            SELECT b.*, u.rating, u.deals_count 
+            SELECT b.*, u.rating, u.deals_count,
+                   u.username as exchanger_username,
+                   u.phone as exchanger_phone,
+                   COALESCE(wa.name, u.display_name, u.username) as exchanger_name
             FROM bids b
             LEFT JOIN users u ON b.exchanger_id = u.telegram_id
+            LEFT JOIN web_accounts wa ON b.exchanger_id = wa.telegram_id
             WHERE b.order_id = ?
             ORDER BY b.rate DESC
         """, (order_id,)) as cursor:
@@ -600,10 +713,10 @@ async def update_bid_message_id(bid_id: int, message_id: int):
         await db.commit()
 
 async def clear_completed_bids(user_id: int):
-    """Delete completed/rejected bids for a user"""
+    """Delete completed/rejected bids for a user (clear archive)"""
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
-            "DELETE FROM bids WHERE exchanger_id = ? AND status IN ('accepted', 'rejected')",
+            "DELETE FROM bids WHERE exchanger_id = ? AND status IN ('accepted', 'rejected', 'completed')",
             (user_id,)
         )
         await db.commit()
@@ -629,29 +742,53 @@ async def get_order_client_id(order_id: int):
 async def get_user_bids(user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        # Join with orders to get order details
+        # Join with orders, users and web_accounts to get client info
         async with db.execute("""
-            SELECT b.*, o.amount, o.currency, o.location, o.status as order_status
+            SELECT b.*, o.amount, o.currency, o.location, o.status as order_status,
+                   o.user_id as client_telegram_id,
+                   u.username as client_username,
+                   COALESCE(u.phone, wa.phone) as client_phone,
+                   COALESCE(wa.name, u.display_name, u.username) as client_name
             FROM bids b
             JOIN orders o ON b.order_id = o.id
+            LEFT JOIN users u ON o.user_id = u.telegram_id
+            LEFT JOIN web_accounts wa ON o.user_id = wa.telegram_id
             WHERE b.exchanger_id = ?
             ORDER BY b.created_at DESC
         """, (user_id,)) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
-async def create_market_post(user_id: int, p_type: str, amount: float, currency: str, rate: float, location: str, description: str, category: str = None, image_data: str = None):
+async def create_market_post(user_id: int, p_type: str, amount: float, currency: str, rate: float, location: str, description: str, category: str = None, image_data: str = None, title: str = None):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
-            INSERT INTO market_posts (user_id, type, amount, currency, rate, location, description, category, image_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, p_type, amount, currency, rate, location, description, category, image_data))
+            INSERT INTO market_posts (user_id, type, amount, currency, rate, location, description, category, image_data, title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, p_type, amount, currency, rate, location, description, category, image_data, title))
         await db.commit()
 
 async def get_market_posts():
+    """Get all market posts with author info"""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM market_posts ORDER BY created_at DESC LIMIT 50") as cursor:
-            return [dict(row) for row in await cursor.fetchall()]
+        async with db.execute("""
+            SELECT mp.*, 
+                   u.username as author_username, 
+                   u.display_name as author_name,
+                   wa.avatar_url as author_avatar_url,
+                   COALESCE(wa.name, u.display_name, u.username) as author_display_name
+            FROM market_posts mp
+            LEFT JOIN users u ON mp.user_id = u.telegram_id
+            LEFT JOIN web_accounts wa ON mp.user_id = wa.telegram_id
+            ORDER BY mp.created_at DESC LIMIT 50
+        """) as cursor:
+            posts = []
+            for row in await cursor.fetchall():
+                post = dict(row)
+                # Use the better name
+                if post.get('author_display_name'):
+                    post['author_name'] = post['author_display_name']
+                posts.append(post)
+            return posts
 
 async def get_exchangers_by_location(location: str = None):
     """Get all exchangers - checks both users and web_accounts tables"""
@@ -786,15 +923,26 @@ async def get_market_post(post_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("""
-            SELECT mp.*, u.username as author_username, u.display_name as author_name
+            SELECT mp.*, 
+                   u.username as author_username, 
+                   u.display_name as author_name,
+                   wa.avatar_url as author_avatar_url,
+                   wa.name as wa_author_name
             FROM market_posts mp
             LEFT JOIN users u ON mp.user_id = u.telegram_id
+            LEFT JOIN web_accounts wa ON mp.user_id = wa.telegram_id
             WHERE mp.id = ?
         """, (post_id,)) as cursor:
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            if row:
+                result = dict(row)
+                # Prefer web_accounts name if available
+                if result.get('wa_author_name'):
+                    result['author_name'] = result['wa_author_name']
+                return result
+            return None
 
-async def update_market_post(post_id: int, user_id: int, amount: float, rate: float, description: str, p_type: str = None, currency: str = None, location: str = None, category: str = None, image_data: str = None):
+async def update_market_post(post_id: int, user_id: int, amount: float, rate: float, description: str, p_type: str = None, currency: str = None, location: str = None, category: str = None, image_data: str = None, title: str = None):
     async with aiosqlite.connect(DB_NAME) as db:
         # Construct query dynamically based on provided fields
         fields = []
@@ -823,6 +971,9 @@ async def update_market_post(post_id: int, user_id: int, amount: float, rate: fl
         if image_data is not None:
             fields.append("image_data = ?")
             values.append(image_data)
+        if title is not None:
+            fields.append("title = ?")
+            values.append(title)
         
         if not fields:
             return
@@ -838,6 +989,108 @@ async def delete_market_post(post_id: int, user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM market_posts WHERE id = ? AND user_id = ?", (post_id, user_id))
         await db.commit()
+
+# ============= FAVORITES FUNCTIONS =============
+
+async def add_favorite(user_id: int, post_id: int):
+    """Add a post to user's favorites"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        try:
+            await db.execute(
+                "INSERT OR IGNORE INTO favorites (user_id, post_id) VALUES (?, ?)",
+                (user_id, post_id)
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+async def remove_favorite(user_id: int, post_id: int):
+    """Remove a post from user's favorites"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "DELETE FROM favorites WHERE user_id = ? AND post_id = ?",
+            (user_id, post_id)
+        )
+        await db.commit()
+
+async def get_user_favorites(user_id: int):
+    """Get all favorite posts for a user with post details"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT mp.*, 
+                   u.username as author_username, 
+                   u.display_name as author_name,
+                   wa.avatar_url as author_avatar_url,
+                   COALESCE(wa.name, u.display_name, u.username) as author_display_name
+            FROM favorites f
+            JOIN market_posts mp ON f.post_id = mp.id
+            LEFT JOIN users u ON mp.user_id = u.telegram_id
+            LEFT JOIN web_accounts wa ON mp.user_id = wa.telegram_id
+            WHERE f.user_id = ?
+            ORDER BY f.created_at DESC
+        """, (user_id,)) as cursor:
+            posts = []
+            for row in await cursor.fetchall():
+                post = dict(row)
+                if post.get('author_display_name'):
+                    post['author_name'] = post['author_display_name']
+                posts.append(post)
+            return posts
+
+async def is_favorite(user_id: int, post_id: int) -> bool:
+    """Check if a post is in user's favorites"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND post_id = ?",
+            (user_id, post_id)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+async def get_user_favorite_ids(user_id: int):
+    """Get list of favorite post IDs for a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT post_id FROM favorites WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            return [row[0] for row in await cursor.fetchall()]
+
+# ============= REPORTS FUNCTIONS =============
+
+async def create_report(reporter_id: int, reported_user_id: int = None, post_id: int = None, reason: str = "", comment: str = None):
+    """Create a report for a user or post"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+            INSERT INTO reports (reporter_id, reported_user_id, post_id, reason, comment)
+            VALUES (?, ?, ?, ?, ?)
+        """, (reporter_id, reported_user_id, post_id, reason, comment))
+        await db.commit()
+
+# ============= HIDDEN POSTS FUNCTIONS =============
+
+async def hide_post(user_id: int, post_id: int):
+    """Hide a post for a user (Not Interested)"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        try:
+            await db.execute(
+                "INSERT OR IGNORE INTO hidden_posts (user_id, post_id) VALUES (?, ?)",
+                (user_id, post_id)
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+async def get_hidden_post_ids(user_id: int):
+    """Get list of hidden post IDs for a user"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT post_id FROM hidden_posts WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            return [row[0] for row in await cursor.fetchall()]
 
 # ============= WEB ACCOUNT AUTH FUNCTIONS =============
 
@@ -984,15 +1237,22 @@ async def login_web_account(nickname: str, password: str) -> dict:
             "telegram_id": row["telegram_id"],
             "telegram_linked": row["telegram_id"] is not None,
             "is_seller": row["is_seller_verified"] == 1,
-            "avatar_url": row["avatar_url"]
+            "avatar_url": row["avatar_url"],
+            "original_avatar_url": row["original_avatar_url"] if "original_avatar_url" in row.keys() else None
         }
 
-async def update_avatar(account_id: int, avatar_url: str):
-    """Update avatar URL for account"""
+async def update_avatar(account_id: int, avatar_url: str, original_avatar_url: str = None):
+    """Update avatar URL and original image for account"""
     async with aiosqlite.connect(DB_NAME) as db:
+        # Add original_avatar_url column if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE web_accounts ADD COLUMN original_avatar_url TEXT")
+        except:
+            pass  # Column already exists
+        
         await db.execute(
-            "UPDATE web_accounts SET avatar_url = ? WHERE id = ?",
-            (avatar_url, account_id)
+            "UPDATE web_accounts SET avatar_url = ?, original_avatar_url = COALESCE(?, original_avatar_url) WHERE id = ?",
+            (avatar_url, original_avatar_url, account_id)
         )
         await db.commit()
 
@@ -1273,15 +1533,6 @@ async def get_user_posts(user_id: int):
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def update_avatar(user_id: int, avatar_url: str):
-    """Update user avatar"""
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE web_accounts SET avatar_url = ? WHERE id = ?",
-            (avatar_url, user_id)
-        )
-        await db.commit()
-
 # ============= DEALS =============
 
 async def create_deal(client_id: int, exchanger_id: int, rate: str, location: str, request_id: int = None, offer_id: int = None):
@@ -1329,3 +1580,124 @@ async def generate_seller_code(telegram_id: int) -> str:
         await db.commit()
     
     return code
+
+# ============= ADMIN: CLEAR ALL ORDERS =============
+
+async def clear_all_orders() -> int:
+    """Delete all orders - returns count of deleted"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM bids")  # Delete bids first (foreign key)
+        await db.execute("DELETE FROM orders")
+        await db.execute("DELETE FROM dismissed_orders")  # Clean dismissed too
+        await db.commit()
+        cursor = await db.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+# ============= EXCHANGER: DISMISS ORDER =============
+
+async def dismiss_order(exchanger_id: int, order_id: int):
+    """Mark order as dismissed by this exchanger"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO dismissed_orders (exchanger_id, order_id) VALUES (?, ?)",
+            (exchanger_id, order_id)
+        )
+        await db.commit()
+
+async def is_order_dismissed(exchanger_id: int, order_id: int) -> bool:
+    """Check if order was dismissed by this exchanger"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM dismissed_orders WHERE exchanger_id = ? AND order_id = ?",
+            (exchanger_id, order_id)
+        )
+        row = await cursor.fetchone()
+        return row is not None
+
+async def clear_dismissed_for_order(order_id: int):
+    """Clear all dismissed records for an order (when client re-creates similar order)"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM dismissed_orders WHERE order_id = ?", (order_id,))
+        await db.commit()
+
+# ============= ADMIN: EXCHANGER BAN MANAGEMENT =============
+
+async def revoke_exchanger_status(telegram_id: int, ban_type: str = None, ban_hours: int = None):
+    """
+    Revoke exchanger status from user
+    ban_type: 'none' (can re-verify), 'temporary', 'permanent'
+    ban_hours: hours for temporary ban
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Remove exchanger status
+        await db.execute(
+            "UPDATE web_accounts SET role = 'client', is_seller_verified = 0 WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        await db.execute(
+            "UPDATE users SET role = 'client' WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        
+        # Handle ban
+        if ban_type == 'permanent':
+            await db.execute(
+                "INSERT OR REPLACE INTO exchanger_bans (telegram_id, ban_type, ban_until) VALUES (?, 'permanent', NULL)",
+                (telegram_id,)
+            )
+        elif ban_type == 'temporary' and ban_hours:
+            from datetime import datetime, timedelta
+            ban_until = datetime.now() + timedelta(hours=ban_hours)
+            await db.execute(
+                "INSERT OR REPLACE INTO exchanger_bans (telegram_id, ban_type, ban_until) VALUES (?, 'temporary', ?)",
+                (telegram_id, ban_until.isoformat())
+            )
+        else:
+            # No ban - can re-verify immediately
+            await db.execute("DELETE FROM exchanger_bans WHERE telegram_id = ?", (telegram_id,))
+        
+        await db.commit()
+
+async def check_exchanger_ban(telegram_id: int) -> dict:
+    """Check if user is banned from becoming exchanger"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM exchanger_bans WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        
+        if not row:
+            return {"banned": False}
+        
+        ban = dict(row)
+        if ban['ban_type'] == 'permanent':
+            return {"banned": True, "type": "permanent"}
+        
+        if ban['ban_type'] == 'temporary' and ban['ban_until']:
+            from datetime import datetime
+            ban_until = datetime.fromisoformat(ban['ban_until'])
+            if datetime.now() < ban_until:
+                return {"banned": True, "type": "temporary", "until": ban_until}
+            else:
+                # Ban expired - remove it
+                await db.execute("DELETE FROM exchanger_bans WHERE telegram_id = ?", (telegram_id,))
+                await db.commit()
+                return {"banned": False}
+        
+        return {"banned": False}
+
+async def get_all_exchangers() -> list:
+    """Get all users with exchanger role"""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT wa.id, wa.telegram_id, wa.nickname, wa.name, wa.role, wa.is_seller_verified
+            FROM web_accounts wa
+            WHERE wa.role = 'exchanger' OR wa.is_seller_verified = 1
+        """)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+

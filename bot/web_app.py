@@ -290,13 +290,37 @@ async def handle_update_avatar(request):
     data = await request.json()
     account_id = data.get('account_id')
     avatar_url = data.get('avatar_url')
+    original_avatar_url = data.get('original_avatar_url')  # Full-size original for re-editing
     
     if not account_id:
         return web.json_response({'error': 'Missing account_id'}, status=400)
     
     from bot.database.database import update_avatar
-    await update_avatar(int(account_id), avatar_url)
+    await update_avatar(int(account_id), avatar_url, original_avatar_url)
     return web.json_response({'status': 'ok'})
+
+@routes.get('/api/account')
+async def handle_get_account(request):
+    """Get account data by account_id - used to load avatar after login"""
+    account_id = request.query.get('account_id')
+    if not account_id:
+        return web.json_response({'error': 'Missing account_id'}, status=400)
+    
+    from bot.database.database import get_account_by_id
+    account = await get_account_by_id(int(account_id))
+    
+    if not account:
+        return web.json_response({'error': 'Account not found'}, status=404)
+    
+    return web.json_response({
+        'id': account.get('id'),
+        'name': account.get('name'),
+        'nickname': account.get('nickname'),
+        'avatar_url': account.get('avatar_url'),
+        'original_avatar_url': account.get('original_avatar_url'),
+        'role': account.get('role'),
+        'telegram_id': account.get('telegram_id')
+    })
 
 @routes.get('/api/user/stats')
 async def handle_get_stats(request):
@@ -311,6 +335,11 @@ async def handle_get_stats(request):
 @routes.post('/api/orders')
 async def handle_create_order(request):
     data = await request.json()
+    
+    # Ensure user has synced data from web_account (phone, name)
+    from bot.database.database import sync_user_from_web_account
+    await sync_user_from_web_account(int(data['user_id']))
+    
     order_id = await create_order(
         int(data['user_id']), 
         float(data['amount']), 
@@ -336,11 +365,15 @@ async def handle_create_order(request):
                     f"💰 <b>{data['amount']} {data['currency']}</b>\n"
                     f"📍 {data['location']}\n"
                     f"🚗 {data['delivery_type']}\n\n"
-                    f"Предложите свой курс!"
+                    f"Хотите взять этот заказ?"
                 )
                 
+                # Uber-style buttons: Take (green) / Don't Take (red)
                 kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💰 Предложить курс", callback_data=f"bid_order:{order_id}")],
+                    [
+                        InlineKeyboardButton(text="✅ Взять", callback_data=f"bid_order:{order_id}"),
+                        InlineKeyboardButton(text="❌ Не брать", callback_data=f"dismiss_order:{order_id}")
+                    ],
                 ])
 
                 try:
@@ -476,6 +509,42 @@ async def handle_clear_completed_bids(request):
     await clear_completed_bids(int(user_id))
     return web.json_response({'status': 'ok'})
 
+@routes.post('/api/bids/{id}/complete')
+async def handle_complete_bid(request):
+    """Mark a deal as completed - exchanger finishes the deal"""
+    bid_id = int(request.match_info['id'])
+    
+    from bot.database.database import complete_bid, get_order
+    
+    bid = await complete_bid(bid_id)
+    
+    if not bid:
+        return web.json_response({'error': 'Bid not found'}, status=404)
+    
+    # Get order details
+    order = await get_order(bid['order_id'])
+    
+    bot = request.app['bot']
+    
+    # Notify client that deal is complete
+    if order:
+        try:
+            text = (
+                f"✅ <b>Сделка завершена!</b>\n\n"
+                f"📄 Заявка #{order['id']}\n"
+                f"💰 {order['amount']} {order['currency']}\n"
+                f"💱 Курс: {bid['rate']}\n\n"
+                f"Спасибо за использование NellX!\n"
+                f"Оставьте отзыв об обменнике."
+            )
+            
+            await bot.send_message(chat_id=order['user_id'], text=text, parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"Failed to notify client about completed deal: {e}")
+    
+    return web.json_response({'status': 'ok'})
+
+
 @routes.post('/api/bids/{id}/accept')
 async def handle_accept_bid(request):
     bid_id = int(request.match_info['id'])
@@ -557,6 +626,44 @@ async def handle_accept_bid(request):
 
     return web.json_response({'status': 'ok', 'order_id': bid['order_id']})
 
+@routes.post('/api/bids/{id}/complete')
+async def handle_complete_bid(request):
+    """Mark a bid/deal as completed"""
+    bid_id = int(request.match_info['id'])
+    
+    from bot.database.database import complete_bid, get_order_client_id
+    
+    bid = await complete_bid(bid_id)
+    if not bid:
+        return web.json_response({'error': 'not_found'}, status=404)
+    
+    # Notify client that deal is completed
+    try:
+        order_client_id = await get_order_client_id(bid['order_id'])
+        if order_client_id:
+            await bot.send_message(
+                chat_id=order_client_id,
+                text=f"✅ Сделка #{bid['order_id']} завершена!\n\n"
+                     f"Спасибо за использование NellX.",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logging.warning(f"Failed to notify client about completed deal: {e}")
+    
+    return web.json_response({'status': 'ok'})
+
+@routes.delete('/api/bids/completed')
+async def handle_delete_completed_bids(request):
+    """Delete all completed/rejected bids for a user (clear archive)"""
+    user_id = request.query.get('user_id')
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import clear_completed_bids
+    await clear_completed_bids(int(user_id))
+    
+    return web.json_response({'status': 'ok'})
+
 @routes.get('/api/market')
 async def handle_get_market(request):
     posts = await get_market_posts()
@@ -567,14 +674,15 @@ async def handle_create_post(request):
     data = await request.json()
     await create_market_post(
         int(data['user_id']),
-        data['type'],
-        float(data['amount']),
-        data['currency'],
-        float(data['rate']),
-        data['location'],
-        data['description'],
+        data.get('type', 'sell'),
+        float(data.get('amount', 0) or 0),
+        data.get('currency', ''),
+        float(data.get('rate', 0) or 0),
+        data.get('location', ''),
+        data.get('description', ''),
         data.get('category'),
-        data.get('image_data')
+        data.get('image_data'),
+        data.get('title')
     )
     return web.json_response({'status': 'ok'})
 
@@ -587,6 +695,103 @@ async def handle_get_my_posts(request):
     from bot.database.database import get_user_market_posts
     posts = await get_user_market_posts(int(user_id))
     return web.json_response(posts)
+
+# ============= FAVORITES ENDPOINTS =============
+
+@routes.get('/api/favorites')
+async def handle_get_favorites(request):
+    """Get all favorites for a user"""
+    user_id = request.query.get('user_id')
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import get_user_favorites
+    posts = await get_user_favorites(int(user_id))
+    return web.json_response(posts)
+
+@routes.get('/api/favorites/ids')
+async def handle_get_favorite_ids(request):
+    """Get list of favorite post IDs for a user"""
+    user_id = request.query.get('user_id')
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import get_user_favorite_ids
+    ids = await get_user_favorite_ids(int(user_id))
+    return web.json_response(ids)
+
+@routes.post('/api/favorites/{post_id}')
+async def handle_add_favorite(request):
+    """Add a post to favorites"""
+    post_id = int(request.match_info['post_id'])
+    data = await request.json()
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import add_favorite
+    await add_favorite(int(user_id), post_id)
+    return web.json_response({'status': 'ok'})
+
+@routes.delete('/api/favorites/{post_id}')
+async def handle_remove_favorite(request):
+    """Remove a post from favorites"""
+    post_id = int(request.match_info['post_id'])
+    user_id = request.query.get('user_id')
+    
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import remove_favorite
+    await remove_favorite(int(user_id), post_id)
+    return web.json_response({'status': 'ok'})
+
+# ============= REPORTS ENDPOINT =============
+
+@routes.post('/api/reports')
+async def handle_create_report(request):
+    """Create a report for a user or post"""
+    data = await request.json()
+    reporter_id = data.get('reporter_id')
+    reported_user_id = data.get('reported_user_id')
+    post_id = data.get('post_id')
+    reason = data.get('reason', '')
+    comment = data.get('comment')
+    
+    if not reporter_id or not reason:
+        return web.json_response({'error': 'Missing required fields'}, status=400)
+    
+    from bot.database.database import create_report
+    await create_report(int(reporter_id), reported_user_id, post_id, reason, comment)
+    return web.json_response({'status': 'ok'})
+
+# ============= HIDDEN POSTS ENDPOINTS =============
+
+@routes.post('/api/hidden')
+async def handle_hide_post(request):
+    """Hide a post (Not Interested)"""
+    data = await request.json()
+    user_id = data.get('user_id')
+    post_id = data.get('post_id')
+    
+    if not user_id or not post_id:
+        return web.json_response({'error': 'Missing required fields'}, status=400)
+    
+    from bot.database.database import hide_post
+    await hide_post(int(user_id), int(post_id))
+    return web.json_response({'status': 'ok'})
+
+@routes.get('/api/hidden')
+async def handle_get_hidden(request):
+    """Get list of hidden post IDs"""
+    user_id = request.query.get('user_id')
+    if not user_id:
+        return web.json_response({'error': 'Missing user_id'}, status=400)
+    
+    from bot.database.database import get_hidden_post_ids
+    ids = await get_hidden_post_ids(int(user_id))
+    return web.json_response(ids)
 
 @routes.get('/api/users/{id}')
 async def handle_get_user_profile(request):
@@ -665,14 +870,15 @@ async def handle_update_post(request):
     await update_market_post(
         post_id, 
         int(user_id), 
-        float(data['amount']), 
-        float(data['rate']), 
-        data['description'],
+        float(data.get('amount', 0) or 0), 
+        float(data.get('rate', 0) or 0), 
+        data.get('description', ''),
         p_type=data.get('type'),
         currency=data.get('currency'),
         location=data.get('location'),
         category=data.get('category'),
-        image_data=data.get('image_data')
+        image_data=data.get('image_data'),
+        title=data.get('title')
     )
     return web.json_response({'status': 'ok'})
 

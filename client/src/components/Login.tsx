@@ -138,7 +138,8 @@ export function Login() {
         telegramId: data.telegram_id,
         accountId: data.account_id,
         role: userRole,
-        avatarUrl: data.avatar_url
+        avatarUrl: data.avatar_url,
+        originalAvatarUrl: data.original_avatar_url // For re-editing avatar
       });
       setRole(userRole);
       completeRegistration();
